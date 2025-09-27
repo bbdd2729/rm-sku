@@ -1,0 +1,98 @@
+name: Build 4.19 + SukiSU + susfs
+
+# 触发条件
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:        # 手动按钮
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    # ---------- ① 拉源码 ----------
+    - name: Checkout main repo
+      uses: actions/checkout@v4
+      with:
+        submodules: 'recursive'    # 若用 submodule 方案
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    # ---------- ② 装依赖 & 官方 clang ----------
+    - name: Install build deps
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison flex libssl-dev libelf-dev libncurses5-dev wget unzip git curl
+
+    - name: Download Android official clang
+      run: |
+        wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android-10.0.0_r33/clang-r353983.tar.gz
+        mkdir -p $HOME/clang
+        tar -xf clang-r353983.tar.gz -C $HOME/clang --strip-components=1
+
+    # ---------- ③ 注入 SukiSU 驱动 ----------
+    - name: Inject SukiSU (non-GKI)
+      run: |
+        cd kernel            # 进入子模块或主代码
+        curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s nongki
+
+    # ---------- ④ 打 susfs 补丁 ----------
+    - name: Apply susfs patch
+      run: |
+        cd kernel
+        git clone https://github.com/TheWildJames/susfs4ksu.git /tmp/susfs
+        patch -p1 < /tmp/susfs/kernel_patches/4.19/00-susfs-v1.5.5-4.19.patch || true
+
+    # ---------- ⑤ 把驱动入口缝进内核树 ----------
+    - name: Add Kconfig & Makefile entry
+      run: |
+        cd kernel
+        echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+        echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+
+    # ---------- ⑥ 配置 & 编译 ----------
+    - name: Configure & Build with KPM enabled
+      run: |
+        cd kernel
+        export ARCH=arm64
+        export CC=$HOME/clang/bin/clang
+        export CROSS_COMPILE=aarch64-linux-android-
+        
+        make your_defconfig
+        scripts/config --enable KSU           \
+                      --enable KSU_KPM        \
+                      --enable KSU_SUSFS      \
+                      --enable KSU_MANUAL_HOOK\
+                      --disable MODULE_SIG    \
+                      --enable KALLSYMS_ALL
+        make -j$(nproc) Image.gz-dtb
+        
+    # ---------- ⑦ 打包 AnyKernel3 ----------
+    - name: Pack flashable zip
+      run: |
+        git clone --depth=1 https://github.com/osm0sis/AnyKernel3 /tmp/ak3
+        cp kernel/arch/arm64/boot/Image.gz-dtb /tmp/ak3/zImage
+        # 如有 dtbo 也拷
+        cp kernel/arch/arm64/boot/dtbo.img /tmp/ak3/ 2>/dev/null || true
+        cd /tmp/ak3
+        # 改分区名（大部分高通）
+        sed -i 's/^block=.*/block=\/dev\/block\/bootdevice\/by-name\/boot/' anykernel.sh
+        zip -r9 $GITHUB_WORKSPACE/SukiSU-4.19.zip * -x .git README.md
+
+    # ---------- ⑧ 上传 artifacts（临时下载） ----------
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: SukiSU-4.19-${{ github.run_number }}
+        path: SukiSU-4.19.zip
+
+    # ---------- ⑨ 发布 Release（可反复覆盖） ----------
+    - name: Release
+      if: github.event_name == 'push'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: auto-v${{ github.run_number }}
+        name: SukiSU 4.19 ‑ Build ${{ github.run_number }}
+        body: Automated build with SukiSU + susfs.
+        files: SukiSU-4.19.zip
+        make_latest: true
