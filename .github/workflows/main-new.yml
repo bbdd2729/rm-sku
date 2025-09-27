@@ -28,6 +28,15 @@ jobs:
         git wget curl ca-certificates gcc make rsync libncurses-dev \
         gcc-aarch64-linux-gnu cpio unzip
         sudo apt-get install -y binutils=2.38-* || true
+        
+        
+        # ---------- ③ 下载 ZyCromerZ Clang-10.0.1（与 build.sh 保持一致） ----------
+    - name: Download ZyCromerZ Clang
+      run: |
+        wget -c https://github.com/ZyCromerZ/Clang/releases/download/10.0.1-20220724-release/Clang-10.0.1-20220724.tar.gz
+        mkdir -p $HOME/clang-tools
+        tar -xzf Clang-10.0.1-20220724.tar.gz -C $HOME/clang-tools
+        rm -f Clang-10.0.1-20220724.tar.gz
     # ---------- ④ 注入 SukiSU ----------
     - name: Inject SukiSU (non-GKI)
       run: |
@@ -54,7 +63,7 @@ jobs:
         cd kernel
         # 环境变量照抄 build.sh
         export KBUILD_BUILD_HOST=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12)
-        export CLANG_PATH=$PWD/clang-tools/bin
+        export CLANG_PATH=$HOME/clang-tools/bin
         export PATH=$CLANG_PATH:$PATH
         export CROSS_COMPILE=aarch64-linux-gnu-
         export ARCH=arm64
