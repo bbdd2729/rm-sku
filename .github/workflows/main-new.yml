@@ -1,0 +1,118 @@
+name: Build 4.19 + SukiSU + susfs（兼容第三方 Clang 版）
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    # ---------- ① 拉源码 ----------
+    - name: Checkout main repo
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    # ---------- ② 依赖：完全照抄 build.sh 列表 ----------
+    - name: Install build dependencies
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
+          build-essential binutils-aarch64-linux-gnu bc bison flex libssl-dev \
+          libelf-dev python3 python3-distutils git wget curl ca-certificates \
+          gcc make rsync libncurses-dev gcc-aarch64-linux-gnu cpio unzip
+
+    # ---------- ③ Clang：ZyCromerZ Clang-10.0.1（同 build.sh） ----------
+    - name: Download ZyCromerZ Clang-10.0.1
+      run: |
+        if [ ! -f Clang-10.0.1-20220724.tar.gz ]; then
+          wget -c https://github.com/ZyCromerZ/Clang/releases/download/10.0.1-20220724-release/Clang-10.0.1-20220724.tar.gz
+        fi
+        mkdir -p $PWD/clang-tools
+        tar -xzf Clang-10.0.1-20220724.tar.gz -C clang-tools
+        rm -f Clang-10.0.1-20220724.tar.gz
+
+    # ---------- ④ 注入 SukiSU ----------
+    - name: Inject SukiSU (non-GKI)
+      run: |
+        cd kernel
+        curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s nongki
+
+    # ---------- ⑤ 打 susfs 补丁 ----------
+    - name: Apply susfs patch
+      run: |
+        cd kernel
+        git clone https://gitlab.com/simonpunk/susfs4ksu.git /tmp/susfs
+        patch -p1 < /tmp/susfs/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
+
+    # ---------- ⑥ 把 SukiSU 缝进内核树 ----------
+    - name: Add Kconfig & Makefile entry
+      run: |
+        cd kernel
+        echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+        echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+
+    # ---------- ⑦ 配置 & 编译：完全复刻 build.sh 参数 ----------
+    - name: Configure & Build
+      run: |
+        # 环境变量照抄 build.sh
+        export KBUILD_BUILD_HOST=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12)
+        export CLANG_PATH=$PWD/clang-tools/bin
+        export PATH=$CLANG_PATH:$PATH
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export ARCH=arm64
+        export LLVM=1
+
+        # 清理历史 out（同 build.sh）
+        [ -d out ] && rm -rf out
+        mkdir -p out
+
+        # 指定 defconfig（按他示例，把 kona-perf 当占位，你换成自己的）
+        KERNEL_DEFCONFIG=vendor/kona-perf_defconfig
+
+        # 先基础配置
+        make O=out LLVM=1 $KERNEL_DEFCONFIG
+
+        # 打开 SukiSU / KPM / susfs 等配置（原脚本需求）
+        scripts/config --file out/.config \
+                      --enable KSU           \
+                      --enable KSU_KPM        \
+                      --enable KSU_SUSFS      \
+                      --enable KSU_MANUAL_HOOK\
+                      --disable MODULE_SIG    \
+                      --enable KALLSYMS_ALL
+
+        # 正式编译
+        make O=out LLVM=1 -j$(nproc)
+
+    # ---------- ⑧ AnyKernel3 打包 ----------
+    - name: Pack flashable zip
+      run: |
+        git clone --depth=1 https://github.com/osm0sis/AnyKernel3 /tmp/ak3
+        cp out/arch/arm64/boot/Image*    /tmp/ak3/zImage  # Image 或 Image.gz-dtb 都能匹配
+        cp out/arch/arm64/boot/dtb       /tmp/ak3/dtb      2>/dev/null || true
+        cp out/arch/arm64/boot/dtbo.img  /tmp/ak3/dtbo.img 2>/dev/null || true
+        cd /tmp/ak3
+        sed -i 's|^block=.*|block=/dev/block/bootdevice/by-name/boot|' anykernel.sh
+        zip -r9 $GITHUB_WORKSPACE/SukiSU-4.19.zip * -x .git README.md
+
+    # ---------- ⑨ 上传 & 发布 ----------
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: SukiSU-4.19-${{ github.run_number }}
+        path: SukiSU-4.19.zip
+
+    - name: Release
+      if: github.event_name == 'push'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: auto-v${{ github.run_number }}
+        name: SukiSU 4.19 ‑ Build ${{ github.run_number }}
+        body: Automated build with SukiSU + susfs (ZyCromerZ Clang-10.0.1).
+        files: SukiSU-4.19.zip
+        make_latest: true
