@@ -33,6 +33,7 @@ jobs:
     - name: Download ZyCromerZ Clang
       run: |
         wget -q https://github.com/ZyCromerZ/Clang/releases/download/10.0.1-20220724-release/Clang-10.0.1-20220724.tar.gz
+        mkdir -p "$HOME/clang-tools"
         tar -xzf Clang-10.0.1-20220724.tar.gz -C "$HOME/clang-tools"
         rm Clang-10.0.1-20220724.tar.gz
 
