@@ -70,14 +70,13 @@ jobs:
         export LLVM=1
 
         # 清理历史 out（同 build.sh）
-        [ -d out ] && rm -rf out
-        mkdir -p out
-
+        rm -rf "$HOME/out"
+        mkdir -p "$HOME/out"
         # 指定 defconfig（按他示例，把 kona-perf 当占位，你换成自己的）
         KERNEL_DEFCONFIG=vendor/kona-perf_defconfig
 
         # 先基础配置
-        make O=out LLVM=1 $KERNEL_DEFCONFIG
+        make O="$HOME/out" LLVM=1 $KERNEL_DEFCONFIG
 
         # 打开 SukiSU / KPM / susfs 等配置（原脚本需求）
         scripts/config --file out/.config \
@@ -89,19 +88,19 @@ jobs:
                       --enable KALLSYMS_ALL
 
         # 正式编译
-        make O=out LLVM=1 -j$(nproc)
+        make O=$HOME/out LLVM=1 -j6
 
     # ---------- ⑧ AnyKernel3 打包 ----------
     - name: Pack flashable zip
       run: |
-        git clone --depth=1 https://github.com/osm0sis/AnyKernel3 /tmp/ak3
-        cp out/arch/arm64/boot/Image*    /tmp/ak3/zImage  # Image 或 Image.gz-dtb 都能匹配
-        cp out/arch/arm64/boot/dtb       /tmp/ak3/dtb      2>/dev/null || true
-        cp out/arch/arm64/boot/dtbo.img  /tmp/ak3/dtbo.img 2>/dev/null || true
+        git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git /tmp/ak3
+        # 产物在 $HOME/out
+        cp "$HOME/out/arch/arm64/boot/Image"*    /tmp/ak3/zImage    2>/dev/null || true
+        cp "$HOME/out/arch/arm64/boot/dtb"       /tmp/ak3/dtb       2>/dev/null || true
+        cp "$HOME/out/arch/arm64/boot/dtbo.img"  /tmp/ak3/dtbo.img  2>/dev/null || true
         cd /tmp/ak3
         sed -i 's|^block=.*|block=/dev/block/bootdevice/by-name/boot|' anykernel.sh
-        zip -r9 $GITHUB_WORKSPACE/SukiSU-4.19.zip * -x .git README.md
-
+        zip -r9 "$GITHUB_WORKSPACE/SukiSU-4.19.zip" * -x .git README.md
     # ---------- ⑨ 上传 & 发布 ----------
     - name: Upload artifact
       uses: actions/upload-artifact@v4
