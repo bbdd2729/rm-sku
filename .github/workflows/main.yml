@@ -15,7 +15,7 @@ jobs:
     - name: Checkout main repo
       uses: actions/checkout@v4
       with:
-        submodules: 'recursive'    # 若用 submodule 方案
+        submodules: 'kernel'    # 若用 submodule 方案
         token: ${{ secrets.GITHUB_TOKEN }}
 
     # ---------- ② 装依赖 & 官方 clang ----------
