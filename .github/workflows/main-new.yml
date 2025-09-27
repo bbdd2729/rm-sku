@@ -19,25 +19,44 @@ jobs:
       run: tree -L 2 -d || ls -F
 
     # ---------- ② 依赖：完全照抄 build.sh 列表 ----------
-    - name: 安装依赖（加新版 binutils）
-      run: |
-        sudo apt-get update -qq
-        sudo apt-get install -y --no-install-recommends \
-        build-essential binutils-aarch64-linux-gnu \
-        bc bison flex libssl-dev libelf-dev python3 python3-setuptools \
-        git wget curl ca-certificates gcc make rsync libncurses-dev \
-        gcc-aarch64-linux-gnu cpio unzip
-        sudo apt-get install -y binutils=2.38-* || true
-        
-        
-        # ---------- ③ 下载 ZyCromerZ Clang-10.0.1（与 build.sh 保持一致） ----------
-    - name: Download ZyCromerZ Clang
-      run: |
-        wget -c https://github.com/ZyCromerZ/Clang/releases/download/10.0.1-20220724-release/Clang-10.0.1-20220724.tar.gz
-        mkdir -p $HOME/clang-tools
-        tar -xzf Clang-10.0.1-20220724.tar.gz -C $HOME/clang-tools
-        rm -f Clang-10.0.1-20220724.tar.gz
-    # ---------- ④ 注入 SukiSU ----------
+    # ---------- ② 依赖 + 缓存 ----------
+- name: Cache system deps
+  uses: actions/cache@v4
+  id: sys-cache
+  with:
+    path: |
+      /usr/bin/aarch64-linux-gnu-
+      /usr/lib/gcc-cross
+      /usr/include/aarch64-linux-gnu
+    key: sys-deps-${{ hashFiles('.github/workflows/**') }}
+
+- name: Install deps (only on cache miss)
+  if: steps.sys-cache.outputs.cache-hit != 'true'
+  run: |
+    sudo apt-get update -qq
+    sudo apt-get install -y --no-install-recommends \
+      build-essential binutils-aarch64-linux-gnu bc bison flex \
+      libssl-dev libelf-dev python3 python3-setuptools git wget \
+      curl ca-certificates gcc make rsync libncurses-dev \
+      gcc-aarch64-linux-gnu cpio unzip
+    sudo apt-get install -y binutils=2.38-* || true
+
+# ---------- ③ Clang + 缓存 ----------
+- name: Cache Clang
+  uses: actions/cache@v4
+  id: clang-cache
+  with:
+    path: ${{ runner.temp }}/clang-tools
+    key: clang-zyc-10.0.1-20220724
+
+- name: Download & unpack Clang (only on cache miss)
+  if: steps.clang-cache.outputs.cache-hit != 'true'
+  run: |
+    wget -q https://github.com/ZyCromerZ/Clang/releases/download/10.0.1-20220724-release/Clang-10.0.1-20220724.tar.gz
+    tar -xzf Clang-10.0.1-20220724.tar.gz -C ${{ runner.temp }}/clang-tools
+    rm Clang-10.0.1-20220724.tar.gz
+
+# 后续步骤统一用 ${{ runner.temp }}/clang-tools/bin 即可    # ---------- ④ 注入 SukiSU ----------
     - name: Inject SukiSU (non-GKI)
       run: |
         cd kernel
@@ -79,7 +98,7 @@ jobs:
         make O="$HOME/out" LLVM=1 $KERNEL_DEFCONFIG
 
         # 打开 SukiSU / KPM / susfs 等配置（原脚本需求）
-        scripts/config --file out/.config \
+        scripts/config --file "$HOME/out/.config" \
                       --enable KSU           \
                       --enable KSU_KPM        \
                       --enable KSU_SUSFS      \
