@@ -24,11 +24,14 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y bc bison flex libssl-dev libelf-dev libncurses5-dev wget unzip git curl
 
-    - name: Download Android official clang
+    - name: Download clang（清华镜像）
       run: |
-        wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android-10.0.0_r33/clang-r353983.tar.gz
         mkdir -p $HOME/clang
-        tar -xf clang-r353983.tar.gz -C $HOME/clang --strip-components=1
+        # 以 r353983 为例，大小 850 MB
+        wget -c --retry-connrefused --tries=3 \
+          https://mirrors.tuna.tsinghua.edu.cn/aosp/kernel/prebuilts/clang/host/linux-x86/clang-r353983.tar.gz \
+          -O clang.tar.gz
+        tar -xf clang.tar.gz -C $HOME/clang --strip-components=1
 
     # ---------- ③ 注入 SukiSU 驱动 ----------
     - name: Inject SukiSU (non-GKI)
