@@ -1,4 +1,4 @@
-name: Build 4.19 + SukiSU + susfs（缓存加速版）
+name: Build 4.19 + SukiSU + susfs（目录安全版）
 
 on:
   push:
@@ -17,19 +17,8 @@ jobs:
           https://github.com/ermyltsor/android_kernel_realme_sm8250.git \
           "$GITHUB_WORKSPACE/kernel"
 
-    # ---------- ② 系统依赖 + 缓存 ----------
-    - name: Cache system deps
-      uses: actions/cache@v4
-      id: sys-cache
-      with:
-        path: |
-          /usr/bin/aarch64-linux-gnu-
-          /usr/lib/gcc-cross
-          /usr/include/aarch64-linux-gnu
-        key: sys-deps-${{ runner.os }}-${{ hashFiles('.github/workflows/**') }}
-
-    - name: Install deps (cache miss only)
-      if: steps.sys-cache.outputs.cache-hit != 'true'
+    # ---------- ② 依赖 ----------
+    - name: Install deps
       run: |
         sudo apt-get update -qq
         sudo apt-get install -y --no-install-recommends \
@@ -37,21 +26,14 @@ jobs:
           libssl-dev libelf-dev python3 python3-setuptools git wget \
           curl ca-certificates gcc make rsync libncurses-dev \
           gcc-aarch64-linux-gnu cpio unzip
+        # 可选：更新 binutils
         sudo apt-get install -y binutils=2.38-* || true
 
-    # ---------- ③ Clang + 缓存 ----------
-    - name: Cache Clang
-      uses: actions/cache@v4
-      id: clang-cache
-      with:
-        path: ${{ runner.temp }}/clang-tools
-        key: clang-zyc-10.0.1-20220724
-
-    - name: Download & unpack Clang (cache miss only)
-      if: steps.clang-cache.outputs.cache-hit != 'true'
+    # ---------- ③ Clang ----------
+    - name: Download ZyCromerZ Clang
       run: |
         wget -q https://github.com/ZyCromerZ/Clang/releases/download/10.0.1-20220724-release/Clang-10.0.1-20220724.tar.gz
-        tar -xzf Clang-10.0.1-20220724.tar.gz -C ${{ runner.temp }}/clang-tools
+        tar -xzf Clang-10.0.1-20220724.tar.gz -C "$HOME/clang-tools"
         rm Clang-10.0.1-20220724.tar.gz
 
     # ---------- ④ SukiSU ----------
@@ -79,7 +61,7 @@ jobs:
       working-directory: ${{ github.workspace }}/kernel
       run: |
         export KBUILD_BUILD_HOST=gh-actions
-        export PATH="${{ runner.temp }}/clang-tools/bin:$PATH"
+        export PATH="$HOME/clang-tools/bin:$PATH"
         export CROSS_COMPILE=aarch64-linux-gnu-
         export ARCH=arm64
         export LLVM=1
@@ -87,12 +69,14 @@ jobs:
         rm -rf "$HOME/out"
         mkdir -p "$HOME/out"
 
-        make O="$HOME/out" LLVM=1 vendor/kona-perf_defconfig
+        KERNEL_DEFCONFIG=vendor/kona-perf_defconfig
+        make O="$HOME/out" LLVM=1 "$KERNEL_DEFCONFIG"
 
+        # 开feature
         scripts/config --file "$HOME/out/.config" \
                       --enable KSU            \
-                      --enable KSU_KPM        \
-                      --enable KSU_SUSFS      \
+                      --enable KSU_KPM         \
+                      --enable KSU_SUSFS       \
                       --enable KSU_MANUAL_HOOK \
                       --disable MODULE_SIG     \
                       --enable KALLSYMS_ALL
@@ -102,6 +86,7 @@ jobs:
     - name: Pack flashable zip
       run: |
         git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git /tmp/ak3
+        # 产物在 $HOME/out
         cp "$HOME/out/arch/arm64/boot/Image"*    /tmp/ak3/zImage    2>/dev/null || true
         cp "$HOME/out/arch/arm64/boot/dtb"       /tmp/ak3/dtb       2>/dev/null || true
         cp "$HOME/out/arch/arm64/boot/dtbo.img"  /tmp/ak3/dtbo.img  2>/dev/null || true
@@ -125,3 +110,6 @@ jobs:
         body: Automated build with SukiSU + susfs (ZyCromerZ Clang-10.0.1).
         files: SukiSU-4.19.zip
         make_latest: true
+
+
+
