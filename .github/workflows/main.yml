@@ -24,14 +24,13 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y bc bison flex libssl-dev libelf-dev libncurses5-dev wget unzip git curl
 
-    - name: Download clang（清华镜像）
+    - name: Download clang（清华 git 镜像）
       run: |
+        git clone --depth=1 https://mirrors.tuna.tsinghua.edu.cn/git/AOSP/platform/prebuilts/clang/host/linux-x86.git $HOME/clang-repo
+        # 取出我们想要的版本（例：r353983）
         mkdir -p $HOME/clang
-        # 以 r353983 为例，大小 850 MB
-        wget -c --retry-connrefused --tries=3 \
-          https://mirrors.tuna.tsinghua.edu.cn/aosp/kernel/prebuilts/clang/host/linux-x86/clang-r353983.tar.gz \
-          -O clang.tar.gz
-        tar -xf clang.tar.gz -C $HOME/clang --strip-components=1
+        cp -a $HOME/clang-repo/clang-r353983/* $HOME/clang/
+        rm -rf $HOME/clang-repo   # 删掉大仓库，节省空间
 
     # ---------- ③ 注入 SukiSU 驱动 ----------
     - name: Inject SukiSU (non-GKI)
