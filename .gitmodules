@@ -1,0 +1,4 @@
+[submodule "kernel"]
+	path = kernel
+	url = https://github.com/YourVendor/android_kernel_4.19.git
+	branch = main
