@@ -19,40 +19,15 @@ jobs:
       run: tree -L 2 -d || ls -F
 
     # ---------- ② 依赖：完全照抄 build.sh 列表 ----------
-    - name: Install build dependencies
+    - name: 安装依赖（加新版 binutils）
       run: |
         sudo apt-get update -qq
         sudo apt-get install -y --no-install-recommends \
-        build-essential \
-        binutils-aarch64-linux-gnu \
-        bc \
-        bison \
-        flex \
-        libssl-dev \
-        libelf-dev \
-        python3 \
-        python3-setuptools \
-        git \
-        wget \
-        curl \
-        ca-certificates \
-        gcc \
-        make \
-        rsync \
-        libncurses-dev \
-        gcc-aarch64-linux-gnu \
-        cpio \
-        unzip
-    #   ---------- ③ Clang：ZyCromerZ Clang-10.0.1（同 build.sh） ----------
-    - name: Download ZyCromerZ Clang-10.0.1
-      run: |
-        if [ ! -f Clang-10.0.1-20220724.tar.gz ]; then
-          wget -c https://github.com/ZyCromerZ/Clang/releases/download/10.0.1-20220724-release/Clang-10.0.1-20220724.tar.gz
-        fi
-        mkdir -p $PWD/clang-tools
-        tar -xzf Clang-10.0.1-20220724.tar.gz -C clang-tools
-        rm -f Clang-10.0.1-20220724.tar.gz
-
+        build-essential binutils-aarch64-linux-gnu \
+        bc bison flex libssl-dev libelf-dev python3 python3-setuptools \
+        git wget curl ca-certificates gcc make rsync libncurses-dev \
+        gcc-aarch64-linux-gnu cpio unzip
+        sudo apt-get install -y binutils=2.38-* || true
     # ---------- ④ 注入 SukiSU ----------
     - name: Inject SukiSU (non-GKI)
       run: |
