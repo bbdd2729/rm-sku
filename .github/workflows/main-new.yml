@@ -1,4 +1,4 @@
-name: Build 4.19 + SukiSU + susfs（兼容第三方 Clang 版）
+name: Build 4.19 + SukiSU + susfs（缓存加速版）
 
 on:
   push:
@@ -10,116 +10,105 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-    # ---------- ① 拉源码 ----------
-# ---------- ① 直接 clone 内核源码 ----------
+    # ---------- ① 源码 ----------
     - name: Clone kernel source
       run: |
-        git clone --depth=1 --branch rui5.0 https://github.com/ermyltsor/android_kernel_realme_sm8250.git kernel
-    - name: 看看到底有什么
-      run: tree -L 2 -d || ls -F
+        git clone --depth=1 --branch rui5.0 \
+          https://github.com/ermyltsor/android_kernel_realme_sm8250.git \
+          "$GITHUB_WORKSPACE/kernel"
 
-    # ---------- ② 依赖：完全照抄 build.sh 列表 ----------
-    # ---------- ② 依赖 + 缓存 ----------
-- name: Cache system deps
-  uses: actions/cache@v4
-  id: sys-cache
-  with:
-    path: |
-      /usr/bin/aarch64-linux-gnu-
-      /usr/lib/gcc-cross
-      /usr/include/aarch64-linux-gnu
-    key: sys-deps-${{ hashFiles('.github/workflows/**') }}
+    # ---------- ② 系统依赖 + 缓存 ----------
+    - name: Cache system deps
+      uses: actions/cache@v4
+      id: sys-cache
+      with:
+        path: |
+          /usr/bin/aarch64-linux-gnu-
+          /usr/lib/gcc-cross
+          /usr/include/aarch64-linux-gnu
+        key: sys-deps-${{ runner.os }}-${{ hashFiles('.github/workflows/**') }}
 
-- name: Install deps (only on cache miss)
-  if: steps.sys-cache.outputs.cache-hit != 'true'
-  run: |
-    sudo apt-get update -qq
-    sudo apt-get install -y --no-install-recommends \
-      build-essential binutils-aarch64-linux-gnu bc bison flex \
-      libssl-dev libelf-dev python3 python3-setuptools git wget \
-      curl ca-certificates gcc make rsync libncurses-dev \
-      gcc-aarch64-linux-gnu cpio unzip
-    sudo apt-get install -y binutils=2.38-* || true
-
-# ---------- ③ Clang + 缓存 ----------
-- name: Cache Clang
-  uses: actions/cache@v4
-  id: clang-cache
-  with:
-    path: ${{ runner.temp }}/clang-tools
-    key: clang-zyc-10.0.1-20220724
-
-- name: Download & unpack Clang (only on cache miss)
-  if: steps.clang-cache.outputs.cache-hit != 'true'
-  run: |
-    wget -q https://github.com/ZyCromerZ/Clang/releases/download/10.0.1-20220724-release/Clang-10.0.1-20220724.tar.gz
-    tar -xzf Clang-10.0.1-20220724.tar.gz -C ${{ runner.temp }}/clang-tools
-    rm Clang-10.0.1-20220724.tar.gz
-
-# 后续步骤统一用 ${{ runner.temp }}/clang-tools/bin 即可    # ---------- ④ 注入 SukiSU ----------
-    - name: Inject SukiSU (non-GKI)
+    - name: Install deps (cache miss only)
+      if: steps.sys-cache.outputs.cache-hit != 'true'
       run: |
-        cd kernel
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
+          build-essential binutils-aarch64-linux-gnu bc bison flex \
+          libssl-dev libelf-dev python3 python3-setuptools git wget \
+          curl ca-certificates gcc make rsync libncurses-dev \
+          gcc-aarch64-linux-gnu cpio unzip
+        sudo apt-get install -y binutils=2.38-* || true
+
+    # ---------- ③ Clang + 缓存 ----------
+    - name: Cache Clang
+      uses: actions/cache@v4
+      id: clang-cache
+      with:
+        path: ${{ runner.temp }}/clang-tools
+        key: clang-zyc-10.0.1-20220724
+
+    - name: Download & unpack Clang (cache miss only)
+      if: steps.clang-cache.outputs.cache-hit != 'true'
+      run: |
+        wget -q https://github.com/ZyCromerZ/Clang/releases/download/10.0.1-20220724-release/Clang-10.0.1-20220724.tar.gz
+        tar -xzf Clang-10.0.1-20220724.tar.gz -C ${{ runner.temp }}/clang-tools
+        rm Clang-10.0.1-20220724.tar.gz
+
+    # ---------- ④ SukiSU ----------
+    - name: Inject SukiSU
+      working-directory: ${{ github.workspace }}/kernel
+      run: |
         curl -LSs https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh | bash -s nongki
 
-    # ---------- ⑤ 打 susfs 补丁 ----------
+    # ---------- ⑤ susfs 补丁 ----------
     - name: Apply susfs patch
+      working-directory: ${{ github.workspace }}/kernel
       run: |
-        cd kernel
-        git clone https://gitlab.com/simonpunk/susfs4ksu.git /tmp/susfs
+        git clone --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git /tmp/susfs
         patch -p1 < /tmp/susfs/kernel_patches/50_add_susfs_in_kernel-4.19.patch || true
 
-    # ---------- ⑥ 把 SukiSU 缝进内核树 ----------
+    # ---------- ⑥ 缝入内核树 ----------
     - name: Add Kconfig & Makefile entry
+      working-directory: ${{ github.workspace }}/kernel
       run: |
-        cd kernel
         echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
         echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
 
-    # ---------- ⑦ 配置 & 编译：完全复刻 build.sh 参数 ----------
+    # ---------- ⑦ 配置 & 编译 ----------
     - name: Configure & Build
+      working-directory: ${{ github.workspace }}/kernel
       run: |
-        cd kernel
-        # 环境变量照抄 build.sh
-        export KBUILD_BUILD_HOST=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 12)
-        export CLANG_PATH=$HOME/clang-tools/bin
-        export PATH=$CLANG_PATH:$PATH
+        export KBUILD_BUILD_HOST=gh-actions
+        export PATH="${{ runner.temp }}/clang-tools/bin:$PATH"
         export CROSS_COMPILE=aarch64-linux-gnu-
         export ARCH=arm64
         export LLVM=1
 
-        # 清理历史 out（同 build.sh）
         rm -rf "$HOME/out"
         mkdir -p "$HOME/out"
-        # 指定 defconfig（按他示例，把 kona-perf 当占位，你换成自己的）
-        KERNEL_DEFCONFIG=vendor/kona-perf_defconfig
 
-        # 先基础配置
-        make O="$HOME/out" LLVM=1 $KERNEL_DEFCONFIG
+        make O="$HOME/out" LLVM=1 vendor/kona-perf_defconfig
 
-        # 打开 SukiSU / KPM / susfs 等配置（原脚本需求）
         scripts/config --file "$HOME/out/.config" \
-                      --enable KSU           \
+                      --enable KSU            \
                       --enable KSU_KPM        \
                       --enable KSU_SUSFS      \
-                      --enable KSU_MANUAL_HOOK\
-                      --disable MODULE_SIG    \
+                      --enable KSU_MANUAL_HOOK \
+                      --disable MODULE_SIG     \
                       --enable KALLSYMS_ALL
-
-        # 正式编译
-        make O=$HOME/out LLVM=1 -j6
+        make O="$HOME/out" LLVM=1 -j6
 
     # ---------- ⑧ AnyKernel3 打包 ----------
     - name: Pack flashable zip
       run: |
         git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git /tmp/ak3
-        # 产物在 $HOME/out
         cp "$HOME/out/arch/arm64/boot/Image"*    /tmp/ak3/zImage    2>/dev/null || true
         cp "$HOME/out/arch/arm64/boot/dtb"       /tmp/ak3/dtb       2>/dev/null || true
         cp "$HOME/out/arch/arm64/boot/dtbo.img"  /tmp/ak3/dtbo.img  2>/dev/null || true
         cd /tmp/ak3
         sed -i 's|^block=.*|block=/dev/block/bootdevice/by-name/boot|' anykernel.sh
         zip -r9 "$GITHUB_WORKSPACE/SukiSU-4.19.zip" * -x .git README.md
+
     # ---------- ⑨ 上传 & 发布 ----------
     - name: Upload artifact
       uses: actions/upload-artifact@v4
