@@ -81,6 +81,7 @@ jobs:
                       --enable KSU_MANUAL_HOOK \
                       --disable MODULE_SIG     \
                       --enable KALLSYMS_ALL
+                         grep -E 'CONFIG_KSU|CONFIG_KSU_SUSFS|CONFIG_KSU_KPM' "$HOME/out/.config" || echo "❌ 未找到"
         make O="$HOME/out" LLVM=1 -j6
 
     # ---------- ⑧ AnyKernel3 打包 ----------
