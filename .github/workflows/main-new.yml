@@ -87,14 +87,17 @@ jobs:
     - name: Pack flashable zip
       run: |
         git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git /tmp/ak3
-        # 产物在 $HOME/out
         cp "$HOME/out/arch/arm64/boot/Image"*    /tmp/ak3/zImage    2>/dev/null || true
         cp "$HOME/out/arch/arm64/boot/dtb"       /tmp/ak3/dtb       2>/dev/null || true
         cp "$HOME/out/arch/arm64/boot/dtbo.img"  /tmp/ak3/dtbo.img  2>/dev/null || true
+
+
+        mkdir -p /tmp/ak3/tmp
+        chmod 755 /tmp/ak3/tools/* /tmp/ak3/tmp
+
         cd /tmp/ak3
         sed -i 's|^block=.*|block=/dev/block/bootdevice/by-name/boot|' anykernel.sh
         zip -r9 "$GITHUB_WORKSPACE/SukiSU-4.19.zip" * -x .git README.md
-
     # ---------- ⑨ 上传 & 发布 ----------
     - name: Upload artifact
       uses: actions/upload-artifact@v4
