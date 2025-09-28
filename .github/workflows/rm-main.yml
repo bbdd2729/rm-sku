@@ -1,0 +1,106 @@
+name: 修补后
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    # ---------- ① 源码 ----------
+    - name: Clone kernel source
+      run: |
+        git clone --branch rui5.0 https://github.com/bbdd2729/android_kernel_realme.git "$GITHUB_WORKSPACE/kernel"
+    # ---------- ② 依赖 ----------
+    - name: Install deps
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y --no-install-recommends \
+          build-essential binutils-aarch64-linux-gnu bc bison flex \
+          libssl-dev libelf-dev python3 python3-setuptools git wget \
+          curl ca-certificates gcc make rsync libncurses-dev \
+          gcc-aarch64-linux-gnu cpio unzip
+        # 可选：更新 binutils
+        sudo apt-get install -y binutils=2.38-* || true
+
+    # ---------- ③ Clang ----------
+    - name: Download ZyCromerZ Clang
+      run: |
+        wget -q https://github.com/ZyCromerZ/Clang/releases/download/10.0.1-20220724-release/Clang-10.0.1-20220724.tar.gz
+        mkdir -p "$HOME/clang-tools"
+        tar -xzf Clang-10.0.1-20220724.tar.gz -C "$HOME/clang-tools"
+        rm Clang-10.0.1-20220724.tar.gz
+
+    # ---------- ④ SukiSU ----------
+    - name: Inject SukiSU
+      working-directory: ${{ github.workspace }}/kernel
+      run: |
+        curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s nongki
+
+    # ---------- ⑥ 缝入内核树 ----------
+    - name: Add Kconfig & Makefile entry
+      working-directory: ${{ github.workspace }}/kernel
+      run: |
+        echo 'obj-$(CONFIG_KSU) += kernelsu/' >> drivers/Makefile
+        echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+
+    # ---------- ⑦ 配置 & 编译 ----------
+    - name: Configure & Build
+      working-directory: ${{ github.workspace }}/kernel
+      run: |
+        export KBUILD_BUILD_HOST=gh-actions
+        export PATH="$HOME/clang-tools/bin:$PATH"
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export ARCH=arm64
+        export LLVM=1
+
+        rm -rf "$HOME/out"
+        mkdir -p "$HOME/out"
+
+        KERNEL_DEFCONFIG=vendor/kona-perf_defconfig
+        make O="$HOME/out" LLVM=1 "$KERNEL_DEFCONFIG"
+
+        # 开feature
+        scripts/config --file "$HOME/out/.config" \
+                  --enable KSU                     \
+                  --enable KSU_MANUAL_HOOK         \
+                  --enable KSU_KPM                 \
+                  --enable KSU_SUSFS               \
+                  --enable KALLSYMS_ALL                         
+                  grep -E 'CONFIG_KSU|CONFIG_KSU_SUSFS|CONFIG_KSU_KPM' "$HOME/out/.config" || echo "❌ 未找到"
+        make O="$HOME/out" LLVM=1 -j6
+
+    # ---------- ⑧ AnyKernel3 打包 ----------
+    - name: Pack flashable zip
+      run: |
+        git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git /tmp/ak3
+        cp "$HOME/out/arch/arm64/boot/Image"*    /tmp/ak3/zImage    2>/dev/null || true
+        cp "$HOME/out/arch/arm64/boot/dtb"       /tmp/ak3/dtb       2>/dev/null || true
+        cp "$HOME/out/arch/arm64/boot/dtbo.img"  /tmp/ak3/dtbo.img  2>/dev/null || true
+
+
+        mkdir -p /tmp/ak3/tmp
+        chmod 755 /tmp/ak3/tools/* /tmp/ak3/tmp
+
+        cd /tmp/ak3
+        sed -i 's|^block=.*|block=/dev/block/bootdevice/by-name/boot|' anykernel.sh
+        zip -r9 "$GITHUB_WORKSPACE/SukiSU-4.19.zip" * -x .git README.md
+    # ---------- ⑨ 上传 & 发布 ----------
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: SukiSU-4.19-${{ github.run_number }}
+        path: SukiSU-4.19.zip
+
+    - name: Release
+      if: github.event_name == 'push'
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: auto-v${{ github.run_number }}
+        name: SukiSU 4.19 ‑ Build ${{ github.run_number }}
+        body: Automated build with SukiSU + susfs (ZyCromerZ Clang-10.0.1).
+        files: SukiSU-4.19.zip
+        make_latest: true
